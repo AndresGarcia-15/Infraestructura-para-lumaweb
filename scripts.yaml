@@ -1,0 +1,177 @@
+---
+- name: Configuración de la máquina virtual
+  hosts: all
+  become: yes
+  vars:
+    project_root: "/root/proyecto_luma"
+    venv_path: "{{ project_root }}/ejecutable/venv"
+    ejecutable_path: "{{ project_root }}/ejecutable"
+    env_file_path: "{{ ejecutable_path }}/.env"
+    local_env_file_path: "~/proyecto_luma/ejecutable/.env"
+    local_scripts_path: "~/proyecto_luma/ejecutable"
+    local_data_db_path: "~/proyecto_luma/ejecutable/DATA.db"
+    local_data_folder_path: "{{ project_root }}/ejecutable/DATA"
+    scripts:
+      - "requirements.txt"
+      - "ingresarDB.py"
+      - "geturls.py"
+      - "SubiraBD.py"
+      - "saiyajin_v3.py"
+    dependencies:
+      - requests
+      - beautifulsoup4
+      - numpy
+      - pandas
+      - matplotlib
+      - scikit-image
+      - scipy
+      - numba
+      - argparse
+      - opencv-python
+      - PyWavelets
+      - lxml
+      - sqlalchemy
+      - psycopg2
+
+  tasks:
+    - name: Actualizar los repositorios
+      apt:
+        update_cache: yes
+
+    - name: Instalar dependencias necesarias (python, sqlite3, y postgresql)
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - sqlite3
+          - postgresql
+          - postgresql-contrib
+        state: present
+
+    - name: Instalar dependencias para psycopg2
+      apt:
+        name:
+          - libpq-dev
+          - python3-dev
+        state: present
+
+    - name: Instalar python-dotenv
+      pip:
+        name: python-dotenv
+        state: present
+    - name: Instalar dependencias necesarias para OpenCV
+      apt:
+        name:
+          - libgl1-mesa-glx
+          - libglib2.0-0
+        state: present
+
+    - name: Iniciar el servicio PostgreSQL
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Esperar a que PostgreSQL esté disponible
+      wait_for:
+        host: "localhost"
+        port: 5432
+        state: started
+        timeout: 300
+
+    - name: Crear directorio principal del proyecto
+      file:
+        path: "{{ project_root }}"
+        state: directory
+        mode: '0755'
+
+    - name: Crear directorio ejecutable
+      file:
+        path: "{{ ejecutable_path }}"
+        state: directory
+        mode: '0755'
+
+    # Primero copiamos DATA.db
+    - name: Copiar el archivo DATA.db al servidor
+      copy:
+        src: "{{ local_data_db_path }}"
+        dest: "{{ ejecutable_path }}/DATA.db"
+        force: yes
+        mode: '0644'
+
+    - name: crear la carpeta DATA al servidor
+      file:
+        path: "{{ local_data_folder_path }}"
+        state: directory
+        mode: '0755'
+
+    # Verificamos que DATA.db existe y esperar a que esté completamente copiado
+    - name: Verificar que DATA.db existe y está listo
+      wait_for:
+        path: "{{ ejecutable_path }}/DATA.db"
+        state: present
+        timeout: 30
+
+    # Luego copiamos el resto de archivos
+    - name: Copiar el archivo .env al servidor
+      copy:
+        src: "{{ local_env_file_path }}"
+        dest: "{{ env_file_path }}"
+        force: yes
+        mode: '0644'
+
+    - name: Copiar los scripts necesarios al servidor
+      copy:
+        src: "{{ local_scripts_path }}/{{ item }}"
+        dest: "{{ ejecutable_path }}/{{ item }}"
+        force: yes
+        mode: '0755'
+      loop: "{{ scripts }}"
+
+    - name: Instalar dependencias de Python
+      pip:
+        name: "{{ item }}"
+        executable: /usr/bin/pip3
+        chdir: "{{ ejecutable_path }}"
+        state: present
+      loop: "{{ dependencies }}"
+
+    - name: Crear entorno virtual
+      command: python3 -m venv {{ venv_path }}
+      args:
+        creates: "{{ venv_path }}"
+
+    - name: Copiar requirements.txt al servidor
+      copy:
+        src: "{{ local_scripts_path }}/requirements.txt"
+        dest: "{{ ejecutable_path }}/requirements.txt"
+        force: yes
+        mode: '0644'
+
+    - name: Instalar dependencias en el entorno virtual
+      command: "{{ venv_path }}/bin/pip install -r {{ ejecutable_path }}/requirements.txt"
+
+    # Ahora ejecutamos ingresarDB.py
+    - name: Ejecutar ingresarDB.py
+      command: /usr/bin/python3 {{ ejecutable_path }}/ingresarDB.py
+      register: initial_run
+
+    - name: Mostrar resultado de la ejecución inicial
+      debug:
+        var: initial_run.stdout_lines
+
+    - name: Configurar cron para ejecutar ingresarDB.py al iniciar la máquina
+      cron:
+        name: "Ejecutar ingresarDB.py al iniciar la máquina"
+        special_time: reboot
+        user: root
+        job: "/usr/bin/python3 {{ ejecutable_path }}/ingresarDB.py && sleep 30"
+
+    - name: Configurar la tarea cron para ejecutar geturls.py
+      cron:
+        name: "Ejecutar geturls.py cada día a las 6:00"
+        minute: "*/5"
+        hour: "*"
+        job: "cd {{ ejecutable_path }} && {{ venv_path }}/bin/python3 {{ ejecutable_path }}/geturls.py >> /root/proyecto_luma/ejecutable/logfile.log 2>&1"
+        user: root
