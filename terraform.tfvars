@@ -1,1 +1,1 @@
-git_token       = "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"
+git_token       = ""
