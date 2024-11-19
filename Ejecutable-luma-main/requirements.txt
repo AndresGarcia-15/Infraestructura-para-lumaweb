@@ -1,0 +1,15 @@
+requests
+bs4
+numpy
+pandas
+matplotlib
+scikit-image
+scipy
+numba
+argparse
+opencv-python
+PyWavelets
+lxml
+sqlalchemy
+psycopg2
+python-dotenv

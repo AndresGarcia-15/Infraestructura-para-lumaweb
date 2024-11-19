@@ -1,1 +1,10 @@
-/Ejecutable-luma-main
+Ejecutable-luma-main/.env
+ejecutable
+*.pyc
+*.pyo
+*.pyd
+
+.venv
+__pycache__
+
+
